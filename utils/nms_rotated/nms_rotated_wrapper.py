@@ -30,6 +30,7 @@ def obb_nms(dets, scores, iou_thr, device_id=None):
     else:
         # same bug will happen when bboxes is too small
         too_small = dets_th[:, [2, 3]].min(1)[0] < 0.001 # [n]
+        too_small = too_small.cpu()
         if too_small.all(): # all the bboxes is too small
             inds = dets_th.new_zeros(0, dtype=torch.int64)
         else:
@@ -38,7 +39,7 @@ def obb_nms(dets, scores, iou_thr, device_id=None):
             dets_th = dets_th[~too_small] # (n_filter, 5)
             scores = scores[~too_small]
 
-            inds = nms_rotated_ext.nms_rotated(dets_th, scores, iou_thr)
+            inds = nms_rotated_ext.nms_rotated(dets_th, scores, iou_thr).cpu()
             inds = ori_inds[inds]
 
     if is_numpy:
