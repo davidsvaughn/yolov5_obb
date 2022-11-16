@@ -158,7 +158,7 @@ class _RepeatSampler:
 
 class LoadImages:
     # YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`
-    def __init__(self, path, img_size=640, stride=32, auto=True):
+    def __init__(self, path, img_size=640, stride=32, auto=True, pad=0):
         p = str(Path(path).resolve())  # os-agnostic absolute path
         if '*' in p:
             files = sorted(glob.glob(p, recursive=True))  # glob
@@ -180,6 +180,7 @@ class LoadImages:
         self.video_flag = [False] * ni + [True] * nv
         self.mode = 'image'
         self.auto = auto
+        self.pad = pad
         if any(videos):
             self.new_video(videos[0])  # new video
         else:
@@ -219,15 +220,25 @@ class LoadImages:
             img0 = cv2.imread(path)  # BGR
             assert img0 is not None, f'Image Not Found {path}'
             s = f'image {self.count}/{self.nf} {path}: '
+        
+        ## ORIGINAL CODE.....
+        if not isinstance(self.img_size[0], list):
+            # Padded resize
+            img = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[0]
+            # Convert
+            img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+            img = np.ascontiguousarray(img)
+            return path, img, img0, self.cap, s
 
-        # Padded resize
-        img = letterbox(img0, self.img_size, stride=self.stride, auto=self.auto)[0]
-
-        # Convert
-        img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-        img = np.ascontiguousarray(img)
-
-        return path, img, img0, self.cap, s
+        ## IMAGE AT MULTIPLE SCALES....
+        else:
+            imgs = []
+            for img_size in self.img_size:
+                img, ratio, pad = letterbox(img0, img_size, stride=self.stride, auto=self.auto, scaleup=False, pad=int(self.pad * max(img_size)))
+                img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+                img = np.ascontiguousarray(img)
+                imgs.append(img)
+            return path, imgs, img0, self.cap, s
 
     def new_video(self, path):
         self.frame = 0

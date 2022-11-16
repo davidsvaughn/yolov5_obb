@@ -57,7 +57,7 @@ def poly2rbox(polys, num_cls_thata=180, radius=6.0, use_pi=False, use_gaussian=F
         csl_labels = []
     rboxes = []
     for poly in polys:
-        poly = np.float32(poly.reshape(4, 2))
+        poly = np.float32(poly.reshape(4, 2).cpu())
         (x, y), (w, h), angle = cv2.minAreaRect(poly) # θ ∈ [0， 90]
         angle = -angle # θ ∈ [-90， 0]
         theta = angle / 180 * pi # 转为pi制
