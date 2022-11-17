@@ -87,7 +87,12 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
     pi = 3.141592
 
     # imgsz = [768, 1024, 1152, 1280, 1408, 1536, 1664, 1792, 1920, 2048, 2176, 2304, 2432, 2560]
-    imgsz = [768, 1024, 1280, 1536, 1792, 2048, 2304, 2560]
+    imgsz = [640, 768, 1024, 1280, 1536, 1792, 2048, 2304, 2560]
+    # imgsz = [640, 1024, 1536, 2048, 2560, 3008]
+
+    imgsz = [1024, 1536, 2048, 2560, 3008, 3200]
+
+    # imgsz = [512, 768, 1024, 1280, 1536, 1664, 1920, 2176, 2432, 2688, 3200]
 
     imgsz.sort()
     imgsz = check_img_size(imgsz, s=stride)  # check image size
@@ -119,15 +124,9 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
     dt, seen = [0.0, 0.0, 0.0], 0
     for path, ims, im0s, vid_cap, s in dataset:
         t1 = time_sync()
-        ###########################################
 
-        # im = torch.from_numpy(im).to(device)
-        # im = im.half() if half else im.float()  # uint8 to fp16/32
-        # im /= 255  # 0 - 255 to 0.0 - 1.0
-        # if len(im.shape) == 3:
-        #     im = im[None]  # expand for batch dim
-
-        tmp = []
+        ## stack multiple copies of image at different scales
+        shapes,tmp = [],[]
         for im in ims:
             im = torch.from_numpy(im)#.to(device)
             im = im.half() if half else im.float()  # uint8 to fp16/32
@@ -135,20 +134,18 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
             if len(im.shape) == 3:
                 im = im[None]  # expand for batch dim
             tmp.append(im)
+            shapes.append(im.shape[2:])
+
         ims, tmp = tmp, None
 
-        ## stack image at multiple sizes
         bs = len(ims)
         img = torch.zeros(bs, *(ims[-1].shape[1:]))
-        shapes = []
         for i,im in enumerate(ims):
             dim = im.shape[2:]
-            shapes.append(dim)
+            # shapes.append(dim)
             img[i,:,:dim[0],:dim[1]] = im
-        ims = None
-        img = img.to(device)
+        img, ims = img.to(device), None
 
-        ###########################################
         t2 = time_sync()
         dt[0] += t2 - t1
 
@@ -159,17 +156,18 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         t3 = time_sync()
         dt[1] += t3 - t2
 
-        # NMS
-        # pred: list*(n, [xylsθ, conf, cls]) θ ∈ [-pi/2, pi/2)
-        pred = non_max_suppression_obb(pred, conf_thres, iou_thres, classes, agnostic_nms, multi_label=True, max_det=max_det)
+        # NMS #1
+        pred = non_max_suppression_obb(pred, conf_thres, iou_thres, classes, agnostic_nms, multi_label=True, max_det=max_det, delay=True)
         dt[2] += time_sync() - t3
 
-        ## NMS round 2 (multi-scale!!)
-        dets = []
-        n = 0
+        # print(f'\nimgsz\tcmean\tcsum')##debug
+
+        ## prep for NMS #2 (multi-scale)
+        dets,n = [],0
         for i, det in enumerate(pred):  # per image
             if not len(det): continue
-            # det[:, :4] = scale_coords(shapes[i], det[:, :4], im0s.shape).round()   # Rescale boxes to all same
+            # cm, cs = det[:, -2].mean(), det[:, -2].sum()##debug
+            # print(f'{imgsz[i][0]}\t{cm:0.4f}\t{cs:0.2f}')##debug
             pred_poly = rbox2poly(det[:, :5])
             pred_poly = scale_polys(shapes[i], pred_poly, im0s.shape)
             det = torch.cat((pred_poly, det[:, -2:]), dim=1) # (n, [poly conf cls])
@@ -182,13 +180,10 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         theta = (theta - 90) / 180 * pi # [n_conf_thres, 1] θ ∈ [-pi/2, pi/2)
         rboxes[:,-1] = theta
 
+        ## NMS #2
         _, i = obb_nms(torch.tensor(rboxes, dtype=torch.float32), scores.cpu(), iou_thres)
         pred = dets[i]
         pred = pred[None,:]##dsv
-
-        # boxes, scores = dets[:, :4], dets[:, 4]  # boxes, scores
-        # i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
-        # pred = dets[i]
 
         ###########################################
 
@@ -196,7 +191,6 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
         # Process predictions
-        # annotator = Annotator(im0s.copy(), line_width=line_thickness, example=str(names))##dsv
         for i, det in enumerate(pred):  # per image
             # pred_poly = rbox2poly(det[:, :5]) # (n, [x1 y1 x2 y2 x3 y3 x4 y4])
             seen += 1
@@ -214,13 +208,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))##dsv
             if len(det):
-                # Rescale polys from img_size to im0 size
-                # det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
-                # pred_poly = scale_polys(im.shape[2:], pred_poly, im0.shape)
-                # det = torch.cat((pred_poly, det[:, -2:]), dim=1) # (n, [poly conf cls])
 
                 # Print results
-                # det = det[None,:]##dsv
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
@@ -228,7 +217,6 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                 # Write results
                 for *poly, conf, cls in reversed(det):
                     if save_txt:  # Write to file
-                        # xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         poly = poly.tolist()
                         line = (cls, *poly, conf) if save_conf else (cls, *poly)  # label format
                         with open(txt_path + '.txt', 'a') as f:
@@ -237,7 +225,6 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                     if save_img or save_crop or view_img:  # Add poly to image
                         c = int(cls)  # integer class
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                        # annotator.box_label(xyxy, label, color=colors(c, True))
                         annotator.poly_label(poly, label, color=colors(c, True))
                         if save_crop: # Yolov5-obb doesn't support it yet
                             # save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)

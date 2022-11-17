@@ -770,7 +770,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     return output
 
 def non_max_suppression_obb(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False,
-                        labels=(), max_det=1500):
+                        labels=(), max_det=1500, delay=False):
     """Runs Non-Maximum Suppression (NMS) on inference results_obb
     Args:
         prediction (tensor): (b, n_all_anchors, [cx cy l s obj num_cls theta_cls])
@@ -844,6 +844,11 @@ def non_max_suppression_obb(prediction, conf_thres=0.25, iou_thres=0.45, classes
             continue
         elif n > max_nms:  # excess boxes
             x = x[x[:, 5].argsort(descending=True)[:max_nms]]  # sort by confidence
+
+        ## for multiscale detection.... return all boxes... NMS done later....
+        if delay:
+            output[xi] = x
+            continue
 
         # Batched NMS
         c = x[:, 6:7] * (0 if agnostic else max_wh)  # classes
