@@ -13,8 +13,8 @@ Usage:
 """
 
 import argparse
-import os
-import sys
+import os,sys
+import numpy as np
 from pathlib import Path
 
 import cv2
@@ -81,20 +81,21 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
     model = DetectMultiBackend(weights, device=device, dnn=dnn)
     stride, names, pt, jit, onnx, engine = model.stride, model.names, model.pt, model.jit, model.onnx, model.engine
 
-    #################################################################
-    # imgsz = check_img_size(imgsz, s=stride)  # check image size
-    ## set in params...
+    ## misc vars....
     pi = 3.141592
+    pair = False
 
+    #################################################################
+
+    ## BEST....
+    imgsz = [640, 768, 1024, 1280, 1536, 1792, 2048, 2304, 2560] # [8 x 2560] ****************
     # imgsz = [768, 1024, 1152, 1280, 1408, 1536, 1664, 1792, 1920, 2048, 2176, 2304, 2432, 2560]
-    imgsz = [640, 768, 1024, 1280, 1536, 1792, 2048, 2304, 2560]
     # imgsz = [640, 1024, 1536, 2048, 2560, 3008]
 
-    imgsz = [1024, 1536, 2048, 2560, 3008, 3200]
+    ## UNDER CONSTRUCTION!!!! pairing idea....
+    # imgsz, pair = [512, 2688, 768, 2432, 1024, 2176, 1280, 1920, 1536, 1664, 3200], True # [6 x 3200]
 
-    # imgsz = [512, 768, 1024, 1280, 1536, 1664, 1920, 2176, 2432, 2688, 3200]
-
-    imgsz.sort()
+    # imgsz.sort()
     imgsz = check_img_size(imgsz, s=stride)  # check image size
     if len(imgsz) == 1:
         imgsz = [imgsz, imgsz]
@@ -118,6 +119,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         bs = 1  # batch_size
     vid_path, vid_writer = [None] * bs, [None] * bs
 
+    
+
     # Run inference
     sz = imgsz[-1] if isinstance(imgsz[0], list) else imgsz
     model.warmup(imgsz=(1, 3, *sz), half=half)  # warmup
@@ -135,16 +138,27 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                 im = im[None]  # expand for batch dim
             tmp.append(im)
             shapes.append(im.shape[2:])
-
         ims, tmp = tmp, None
+        H,W = shapes[-1]
 
-        bs = len(ims)
-        img = torch.zeros(bs, *(ims[-1].shape[1:]))
-        for i,im in enumerate(ims):
-            dim = im.shape[2:]
-            # shapes.append(dim)
-            img[i,:,:dim[0],:dim[1]] = im
-        img, ims = img.to(device), None
+        if pair:
+            bs = int(np.ceil(len(ims)/2))
+            img = torch.zeros(bs, *(ims[-1].shape[1:]))
+            off, offsets = (0,0),[]
+            for i,im in enumerate(ims):
+                dim = shapes[i]
+                img[i//2, :, off[0]:off[0]+dim[0], off[1]:off[1]+dim[1]] = im
+                offsets.append(off)
+                off = dim if off[0]==0 else (0,0)
+            img, ims = img.to(device), None
+            ## ---- INCOMPLETE!!!!  END OF PAIR CONSTRUCTION!!! ---- ##
+        else:
+            bs = len(ims)
+            img = torch.zeros(bs, *(ims[-1].shape[1:]))
+            for i,im in enumerate(ims):
+                dim = im.shape[2:]
+                img[i,:,:dim[0],:dim[1]] = im
+            img, ims = img.to(device), None
 
         t2 = time_sync()
         dt[0] += t2 - t1
